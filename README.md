@@ -1,69 +1,26 @@
 # Data Structures & Systems Design (SE Intern)
 
-Two problems, solved in `solution.py` with extras in Section 3. Each explanation below is in my own words and comes before its code. The code blocks are short excerpts copied from `solution.py`.
+All the code is in `solution.py` and uses only the Python standard library. Tests are in `tests/`. The code blocks below are copied from `solution.py`, and each one comes after my explanation.
 
-**Assumptions**
-- `capacity` is a positive integer; a value of 0 or less raises `ValueError`. Keys can be any hashable value.
-- Events are `(start, end)` tuples or 2-item lists of ints or floats. `start > end` raises `ValueError`. An empty list gives `True` and `0`.
-- A zero-length event `(t, t)` is valid and still needs a room. It conflicts only with an event that strictly contains `t`. Touching events and events at the same instant never conflict. So `[(5, 5)]` needs 1 room and `[(3, 8), (5, 5)]` needs 2.
-- The caller's list is never changed; I sort a copy.
+**What I assumed**
+- `LRUCache(capacity)` raises `ValueError` if capacity is 0 or less. Keys can be anything hashable.
+- Events are `(start, end)` tuples or 2-item lists. If start is after end, I raise `ValueError`. An empty list gives `True` and `0`.
+- A zero-length event like `(5, 5)` still needs a room. It only clashes with an event running right through that moment, so `[(3, 8), (5, 5)]` needs 2 rooms.
+- I sort a copy, so the caller's list is never changed.
 
 ## Problem 1: LRU Cache
 
 ### My approach
 
-Think of a pile of books on my desk. The book I used last goes on top. When the desk is full, I take the bottom one away.
+It works like a pile of books on a desk: the one I used last goes on top, and when the desk is full the bottom one goes.
 
-I need two things. To find a book fast, I keep a hash map from key to node. To move a book fast, I keep a doubly linked list, with the most recent at the front and the least recent at the back.
+I need to find a key fast and also know which key was used longest ago. A dictionary is good at the first. A list order is good at the second. So I use both: a dict from key to node, and a doubly linked list with the most recent at the front and the least recent at the back.
 
-`get` finds the node, moves it to the front, and returns its value. `put` on an existing key updates it and moves it to the front. `put` on a new key at full capacity removes the node before the tail, deletes its map entry, then adds the new node at the front.
-
-### Code (excerpt from `solution.py`)
-
-```python
-class Node:
-    """Doubly linked list node. __slots__ keeps per-node memory small."""
-
-    __slots__ = ("key", "value", "prev", "next")
-
-    def __init__(self, key: Hashable = None, value: Any = None) -> None:
-        self.key = key
-        self.value = value
-        self.prev: Node = self  # self-links, so the type is never None
-        self.next: Node = self
-```
-
-Methods of `LRUCache` (indentation kept as in the file):
+- `get`: find the node, move it to the front, return the value. Return -1 if the key is missing.
+- `put` on an existing key: update the value and move it to the front.
+- `put` on a new key when full: remove the last node, delete its key from the dict, then add the new node at the front.
 
 ```python
-    def __init__(self, capacity: int) -> None:
-        """Time O(1). Raises ValueError if capacity <= 0."""
-        if capacity <= 0:
-            raise ValueError("capacity must be a positive integer")
-        self.capacity = capacity
-        self._map: dict[Hashable, Node] = {}
-        self._head = Node()  # sentinel: most-recent side
-        self._tail = Node()  # sentinel: least-recent side
-        self._head.next = self._tail
-        self._tail.prev = self._head
-
-    def _remove(self, node: Node) -> None:
-        """Unlink a node. O(1): only touches its two neighbours."""
-        node.prev.next = node.next
-        node.next.prev = node.prev
-
-    def _add_to_front(self, node: Node) -> None:
-        """Insert right after head. O(1)."""
-        node.prev = self._head
-        node.next = self._head.next
-        self._head.next.prev = node
-        self._head.next = node
-
-    def _move_to_front(self, node: Node) -> None:
-        """Mark a node as most recently used. O(1)."""
-        self._remove(node)
-        self._add_to_front(node)
-
     def get(self, key: Hashable) -> Any:
         """Return the value or -1 on a miss; a hit becomes most recent.
         Time O(1): one dict lookup plus pointer moves.
@@ -94,35 +51,21 @@ Methods of `LRUCache` (indentation kept as in the file):
 
 ### Why these data structures
 
-A library has a card catalog and a shelf. The catalog tells me where a book is, with no searching. The shelf order tells me which book was touched last. I need both.
+The dict finds a node in O(1), so I never search. The linked list moves or removes a node in O(1), because each node knows the node before and after it. An ordinary list would need O(n) to move an item.
 
-The hash map gives O(1) lookup, because it jumps straight to the node. The doubly linked list gives O(1) moves, because a node already knows its two neighbours, so I never walk the list. I added a dummy head and tail so I never check for null. Each node also stores its key. When I evict, I need that key to delete the map entry. Without it, I would have to search the map, which is O(n).
+Two small choices help. Dummy nodes at both ends mean I never check for an empty list. Each node stores its own key, so when I evict the last node I can delete it from the dict straight away.
 
 ## Problem 2: Event Scheduler
 
 ### My approach
 
-Think of my diary. I write meetings in time order. Two meetings clash only if the next one starts before the previous one ends. If one ends at 10 and the next starts at 10, I walk straight from one to the other. That is not a clash.
+Like a hotel desk: each meeting is a guest who needs a room, and a room that has been vacated can be given to the next guest.
 
-So `can_attend_all` sorts by start time and checks each meeting against the one before it. If any start is earlier than the previous end, I return False. Otherwise I return True. The sort costs O(n log n) and the scan costs O(n).
+I sort the events by start time. For `can_attend_all`, I go through them once and check that each one starts at or after the previous one ends. If one starts earlier, it returns `False`. Equal times are fine.
 
-### Code (excerpt from `solution.py`)
+For `min_rooms_required`, I keep a min-heap of end times, one for each room in use. For each event, if the earliest end time is at or before the new start, that room is free, so I take it out. Then I add the new end time.
 
 ```python
-Event = Sequence[float]  # (start, end) as a tuple or a 2-item list
-
-
-def _validated_copy(events: Iterable[Event]) -> list[tuple[float, float]]:
-    """Return a fresh list of (start, end) tuples; raise ValueError if
-    start > end. The caller's list is never touched. Time O(n), space O(n)."""
-    cleaned = []
-    for start, end in events:
-        if start > end:
-            raise ValueError(f"start {start} is after end {end}")
-        cleaned.append((start, end))
-    return cleaned
-
-
 def can_attend_all(events: Iterable[Event]) -> bool:
     """True if no event starts before the previous one ends.
     Time O(n log n) for the sort, space O(n) for the sorted copy."""
@@ -148,48 +91,40 @@ def min_rooms_required(events: Iterable[Event]) -> int:
     return peak
 ```
 
-### How the room count works
+### Why the room count works
 
-Think of a hotel front desk. Every meeting is a guest who needs a room. If a room has been vacated, I give it to the guest. If not, I open a new room.
+The top of the heap is the room that frees up first. If even that room is still busy when the new event starts, every room is busy, so I need a new one. If it is free, I reuse it. So the heap only gets bigger when a new room is really needed, and its final size is the answer. Sorting by start means I never miss a room that is already free.
 
-I keep a min-heap of end times, one per room in use. The top is the room that frees up first. For each meeting, if the top end is at or before the new start, that room is free, so I take it back. Then I push the new end time. The most rooms in use at once is my answer. I sort by start first, so I never miss a room that has already freed up.
-
-Two-pointer alternative: sort the start times and the end times separately.
-Walk through the starts. If the next start is before the earliest unused end, I need one more room. Otherwise I move the end pointer forward.
-It is also O(n log n) and needs no heap. I kept the heap because `assign_rooms` needs to know which room frees up.
+Another way is to sort the starts and the ends separately and walk both lists with two pointers. It is also O(n log n) and needs no heap. I used the heap because the same idea also lets me assign rooms.
 
 ## Final Discussion & Analysis
 
 ### Time & Space Complexity
 
-`n` = number of events, `C` = cache capacity. "avg" means a hash lookup is O(1) on average and O(n) only with adversarial hash collisions. The cache as a whole uses O(C) space.
+`n` is the number of events and `C` is the cache capacity. A dict lookup is O(1) on average (the worst case is only with many hash collisions), so I write "avg". The whole cache uses O(C) space.
 
 | Function | Time | Space | Why |
 |---|---|---|---|
-| `LRUCache.__init__` | O(1) | O(1) now, O(C) once full | Builds two sentinels and an empty dict; no loops. |
-| `LRUCache.get` | O(1) avg | O(1) | One dict lookup plus a fixed number of pointer changes; no new objects. |
-| `LRUCache.put` | O(1) avg | O(1) per call | One dict operation plus fixed pointer changes; at most one new node. |
-| `_remove`, `_add_to_front`, `_move_to_front` | O(1) | O(1) | Each touches a fixed number of neighbours and never walks the list. |
-| `ThreadSafeLRUCache.get` / `put` | O(1) avg, plus lock wait | O(1) | The same work, done inside one lock. |
-| `_validated_copy` | O(n) | O(n) | One pass over the events, building a new list. |
-| `can_attend_all` | O(n log n) | O(n) | The sort dominates; the scan is O(n); the sorted copy is O(n). |
-| `min_rooms_required` | O(n log n) | O(n) | Sort, then n heap pushes and pops at O(log n) each; the heap can hold n end times. |
-| `assign_rooms` | O(n log n) | O(n) | Sort, then each event passes through two heaps once at O(log n); the label list is O(n). |
-| `_room_label` | O(log k) | O(log k) | The label for room k has about log base 26 of k letters. |
+| `LRUCache.__init__` | O(1) | O(1) | Two dummy nodes and an empty dict. |
+| `get` | O(1) avg | O(1) | One dict lookup and a few pointer changes. |
+| `put` | O(1) avg | O(1) | A few dict operations, a few pointer changes, at most one new node. |
+| `_remove`, `_add_to_front`, `_move_to_front` | O(1) | O(1) | Each one only touches nearby nodes. |
+| `ThreadSafeLRUCache.get` / `put` | O(1) avg, plus waiting for the lock | O(1) | Same work as above, inside a lock. |
+| `_validated_copy` | O(n) | O(n) | One pass that builds a new list. |
+| `can_attend_all` | O(n log n) | O(n) | The sort takes O(n log n); the scan takes O(n). |
+| `min_rooms_required` | O(n log n) | O(n) | The sort, then n heap pushes and pops at O(log n) each. |
+| `assign_rooms` | O(n log n) | O(n) | The sort, then each event goes through two heaps once. |
+| `_room_label` | O(log k) | O(log k) | The label for room number k has about log k letters. |
 
 ### Trade-offs: hash map plus doubly linked list
 
-Think of a library again. A card catalog tells me where a book is. The shelf order tells me which book was used last.
+A hash map alone gives fast lookup but keeps no usage order, so finding the least recently used entry means scanning everything, which is O(n). A linked list alone keeps the order, but finding a key means walking the list, which is also O(n). Together, both steps are O(1).
 
-A hash map alone is like a catalog with no shelf order. To find the oldest book, I would scan every entry. A linked list alone keeps the order, but finding one book means walking along the shelf, which is O(n). Together, the map jumps to the node and the list moves it, so every step is O(1).
-
-The cost is memory and code. Each entry needs a dict slot plus a node with two pointers. There is also more pointer code to get wrong. In production I would use `OrderedDict`, which does this inside.
+The price is extra memory (two pointers per node on top of the dict entry) and more code, where pointer mistakes are easy to make. In real projects `OrderedDict` does the same job.
 
 ### Future Proofing: assigning room names
 
-At a hotel desk, I keep a tray of free key cards and hand out the lowest number first. I would build the scheduler the same way.
-
-I sort events by start time but keep each event's original index. A min-heap of (end time, room id) tracks rooms in use. Before each event, I move every room that has ended into a second min-heap of free room ids. If it has a room, I take the smallest id. If not, I open the next new id. I turn ids into "Room A", "Room B" and so on, and store each label at the event's original index. The room count matches `min_rooms_required`. Time is still O(n log n).
+I would keep the same approach but also track which room each event gets. I keep two heaps: rooms in use as (end time, room id), and free room ids. For each event in start order, I move rooms that have ended from the first heap to the second, take the smallest free id (or make a new one), and push the new end time with that id. Ids turn into "Room A", "Room B" and so on. I keep each event's original index so the result lines up with the input. The number of rooms equals `min_rooms_required`, and it is still O(n log n).
 
 ```python
 def assign_rooms(events: Iterable[Event]) -> list[str]:
@@ -217,11 +152,9 @@ def assign_rooms(events: Iterable[Event]) -> list[str]:
 
 ### Concurrency: making the LRU Cache thread-safe
 
-Think of a shop with one till. One customer is served at a time. I would add one lock and take it inside both `get` and `put`.
+I would put one lock around `get` and `put`, so only one thread changes the cache at a time. `get` needs it too, because it moves a node. For the same reason a read-write lock would not help: there are no read-only calls.
 
-`get` needs the lock too, because a hit moves a node, so it writes to the list. That is why a read-write lock does not help: there are no read-only calls to run side by side. A plain `Lock` is enough, since `get` and `put` never call each other.
-
-The cost is waiting. To scale up, I could split keys into shards by hash, each with its own lock and LRU. Order is then per shard. Beyond one machine, I would use a shared cache such as Redis.
+The downside is that threads wait for each other. To scale up, I could split the keys into shards, each with its own lock and its own LRU, though the order then only holds inside each shard. Across several machines I would use something like Redis.
 
 ```python
 class ThreadSafeLRUCache:
@@ -245,11 +178,11 @@ class ThreadSafeLRUCache:
 
 ## How to run
 
-Python 3.10 or newer. Standard library only, no installs.
+Standard library only, no installs. Python 3.10 or newer.
 
 ```
 python solution.py
 python -m unittest discover -v
 ```
 
-Run both commands from the folder that contains `solution.py`.
+Run both from the folder that contains `solution.py`.

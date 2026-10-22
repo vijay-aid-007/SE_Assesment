@@ -155,23 +155,6 @@ def assign_rooms(events: Iterable[Event]) -> list[str]:
     return labels
 
 
-if __name__ == "__main__":
-    cache = LRUCache(2)
-    cache.put("a", 1)
-    cache.put("b", 2)
-    print(cache.get("a"))                    # 1 (a is now most recent)
-    cache.put("c", 3)                        # evicts b
-    print(cache.get("b"))                    # -1
-    cache.put("z", 0)                        # evicts a (least recent)
-    print(cache.get("a"), cache.get("c"), cache.get("z"))  # -1 3 0
-
-    meetings = [(0, 30), (5, 10), (15, 20)]
-    print(can_attend_all(meetings))          # False
-    print(min_rooms_required(meetings))      # 2
-    print(assign_rooms(meetings))            # ['Room A', 'Room B', 'Room B']
-
-
-
 class ThreadSafeLRUCache:
     """LRUCache behind one lock. get() reorders the list, so it needs the
     lock just as much as put() does. Same time and space as LRUCache."""
@@ -189,3 +172,22 @@ class ThreadSafeLRUCache:
         """Insert or update, atomically with any eviction."""
         with self._lock:
             self._cache.put(key, value)
+
+
+if __name__ == "__main__":
+    cache = LRUCache(2)
+    cache.put("a", 1)
+    cache.put("b", 2)
+    print(cache.get("a"))                    # 1 (a is now most recent)
+    cache.put("c", 3)                        # evicts b
+    print(cache.get("b"))                    # -1
+    cache.put("z", 0)                        # evicts a (least recent)
+    print(cache.get("a"), cache.get("c"), cache.get("z"))  # -1 3 0
+
+    meetings = [(0, 30), (5, 10), (15, 20)]
+    print(can_attend_all(meetings))          # False
+    print(min_rooms_required(meetings))      # 2
+    print(assign_rooms(meetings))            # ['Room A', 'Room B', 'Room B']
+
+
+

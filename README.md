@@ -21,6 +21,53 @@ I need to find a key fast and also know which key was used longest ago. A dictio
 - `put` on a new key when full: remove the last node, delete its key from the dict, then add the new node at the front.
 
 ```python
+class Node:
+    """Doubly linked list node. __slots__ keeps per-node memory small."""
+
+    __slots__ = ("key", "value", "prev", "next")
+
+    def __init__(self, key: Hashable = None, value: Any = None) -> None:
+        self.key = key
+        self.value = value
+        self.prev: Node = self  # self-links, so the type is never None
+        self.next: Node = self
+
+
+class LRUCache:
+    """Fixed-capacity LRU cache. Most recent item sits right after head;
+    least recent sits right before tail.
+
+    Space: O(capacity) for the dict plus one node per entry.
+    """
+
+    def __init__(self, capacity: int) -> None:
+        """Time O(1). Raises ValueError if capacity <= 0."""
+        if capacity <= 0:
+            raise ValueError("capacity must be a positive integer")
+        self.capacity = capacity
+        self._map: dict[Hashable, Node] = {}
+        self._head = Node()  # sentinel: most-recent side
+        self._tail = Node()  # sentinel: least-recent side
+        self._head.next = self._tail
+        self._tail.prev = self._head
+
+    def _remove(self, node: Node) -> None:
+        """Unlink a node. O(1): only touches its two neighbours."""
+        node.prev.next = node.next
+        node.next.prev = node.prev
+
+    def _add_to_front(self, node: Node) -> None:
+        """Insert right after head. O(1)."""
+        node.prev = self._head
+        node.next = self._head.next
+        self._head.next.prev = node
+        self._head.next = node
+
+    def _move_to_front(self, node: Node) -> None:
+        """Mark a node as most recently used. O(1)."""
+        self._remove(node)
+        self._add_to_front(node)
+
     def get(self, key: Hashable) -> Any:
         """Return the value or -1 on a miss; a hit becomes most recent.
         Time O(1): one dict lookup plus pointer moves.
@@ -66,6 +113,20 @@ I sort the events by start time. For `can_attend_all`, I go through them once an
 For `min_rooms_required`, I keep a min-heap of end times, one for each room in use. For each event, if the earliest end time is at or before the new start, that room is free, so I take it out. Then I add the new end time.
 
 ```python
+Event = Sequence[float]  # (start, end) as a tuple or a 2-item list
+
+
+def _validated_copy(events: Iterable[Event]) -> list[tuple[float, float]]:
+    """Return a fresh list of (start, end) tuples; raise ValueError if
+    start > end. The caller's list is never touched. Time O(n), space O(n)."""
+    cleaned = []
+    for start, end in events:
+        if start > end:
+            raise ValueError(f"start {start} is after end {end}")
+        cleaned.append((start, end))
+    return cleaned
+
+
 def can_attend_all(events: Iterable[Event]) -> bool:
     """True if no event starts before the previous one ends.
     Time O(n log n) for the sort, space O(n) for the sorted copy."""
